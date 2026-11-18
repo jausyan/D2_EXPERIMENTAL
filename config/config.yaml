@@ -11,10 +11,25 @@ flight:
   cruise_altitude: 1.3
 
 gate:
-  pcd_path: data/gate_sim.npy
-  center: [2.5, 0.0, 1.3]       
-  finish_offset_x: -5.0         
+  pcd_path: data/gate_sim_clean.npy       # make it with scripts/capture_gate.py + clean_gate.py
+  model_center: [1.70, 0.13, 1.18]         # centre of the gate opening inside that file (clean_gate.py prints it)
+  center: [2.5, 0.0, 1.3]                 # where that centre sits in the track frame (waypoints, poses)
+  finish_offset_x: null                   # real field: -5.0 adds a second gate 5 m behind, simulation: null
   align_method: GICP
+
+align:                                    # how the gate is found in the live scan
+  max_range: 15.0                         # m, ignore lidar points farther than this
+  search_x: [0, -1, -2, -3, -4, -6, -8]   # m, tried drone positions relative to where the model was captured
+  search_y: [-1.0, 0.0, 1.0]              # m
+  search_yaw_deg: [-15, 0, 15]            # deg
+  coarse_voxel: 0.1                       # m, downsampling for the search
+  coarse_max_dist: 1.0                    # m, GICP match distance in the search
+  coarse_score_radius: 0.1                # m
+  refine_top: 5                           # best candidates refined on the full cloud
+  fine_max_dist: 0.3                      # m, GICP match distance in the refinement
+  fine_score_radius: 0.05                 # m
+  min_score: 0.5                          # 0..1, below this the scan is retried
+  max_attempts: 5
 
 command:                        # inter-drone orders; the strings themselves are written in mission.py
   order_topic: /mission/order   # std_msgs/String, all drones on the same ROS_DOMAIN_ID
@@ -34,11 +49,11 @@ path:
     - [10.5, -0.95, 1.3]
     - [14.5, -0.95, 1.3]
     - [16.5, -0.95, 1.3]
-    - [19.0, -5.0, 1.3]
-    - [18.0, -7.5, 1.3]
-    - [16.0, -9.05, 1.3]
-    - [12.0, -9.05, 1.3]
-    - [10.0, -9.05, 1.3]
+    - [19.0, -5.7, 1.3]
+    - [18.0, -7.9, 1.3]
+    - [16.0, -9.35, 1.3]
+    - [12.0, -9.35, 1.3]
+    - [10.0, -9.35, 1.3]
     - [-2.875, -8.672, 1.3]
     - [-4.25, -8.672, 1.3]
     - [-4.375, -5.0, 1.3]

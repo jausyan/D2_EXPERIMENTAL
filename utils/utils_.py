@@ -1,4 +1,5 @@
 """Helper functions and the ROS 2 drone node used by mission.py."""
+import itertools
 import math
 import time
 from pathlib import Path
@@ -13,6 +14,7 @@ from mavros_msgs.srv import CommandBool, SetMode
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from scipy.interpolate import splev, splprep
+from scipy.spatial import cKDTree
 from sensor_msgs.msg import PointCloud2
 from sensor_msgs_py import point_cloud2
 from std_msgs.msg import String
@@ -155,6 +157,64 @@ def gate_to_world(point, gate_matrix, pose, altitude=None):
 
 
 # --------------------------------------------------------------------------- #
+# Gate alignment
+# --------------------------------------------------------------------------- #
+def _pose_to_T(t, yaw):
+    """Transform that maps model points into the body frame of a drone standing at (t, yaw)
+    in the model's capture frame."""
+    c, s = math.cos(yaw), math.sin(yaw)
+    R = np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
+    T = np.eye(4)
+    T[:3, :3] = R.T
+    T[:3, 3] = -R.T @ np.asarray(t, dtype=float)
+    return T
+
+
+def _alignment_score(T, model, tree, radius):
+    """Fraction of model points that land within `radius` of a scan point (0..1)."""
+    moved = model @ T[:3, :3].T + T[:3, 3]
+    dist, _ = tree.query(moved, distance_upper_bound=radius)
+    return float(np.mean(np.isfinite(dist)))
+
+
+def align_gate(scan, model, cfg):
+    """Find the transform model -> body frame (4x4) and a quality score in 0..1.
+
+    GICP alone only converges when it starts close to the answer, so many starting poses
+    (drone offset forward/back, left/right, yawed) are tried on a coarse cloud, the best ones
+    are refined on the full cloud, and the result with the highest score wins.
+    """
+    a = cfg["align"]
+    scan = np.asarray(scan, dtype=np.float64)
+    scan = scan[np.linalg.norm(scan, axis=1) < a["max_range"]]
+    model = np.asarray(model, dtype=np.float64)
+    coarse = a["coarse_voxel"]
+    scan_c = pygicp.downsample(scan, coarse)
+    model_c = pygicp.downsample(model, coarse)
+    tree_c = cKDTree(scan_c)
+
+    candidates = []
+    for x, y, yaw in itertools.product(a["search_x"], a["search_y"], a["search_yaw_deg"]):
+        T0 = _pose_to_T([x, y, 0.0], math.radians(yaw))
+        T = pygicp.align_points(scan_c, model_c, method=cfg["gate"]["align_method"],
+                                initial_guess=T0.astype(np.float32),
+                                max_correspondence_distance=a["coarse_max_dist"])
+        candidates.append((_alignment_score(T, model_c, tree_c, a["coarse_score_radius"]), T))
+    candidates.sort(key=lambda c: -c[0])
+
+    tree = cKDTree(scan)
+    best_score, best_T = -1.0, None
+    for _, T in candidates[:a["refine_top"]]:
+        T = pygicp.align_points(scan, model, method=cfg["gate"]["align_method"],
+                                initial_guess=T.astype(np.float32),
+                                max_correspondence_distance=a["fine_max_dist"])
+        score = _alignment_score(T, model, tree, a["fine_score_radius"])
+        if score > best_score:
+            best_score, best_T = score, T
+    return best_T, best_score
+
+
+# --------------------------------------------------------------------------- #
 # Drone node
 # --------------------------------------------------------------------------- #
 class DroneNode(Node):
@@ -241,29 +301,53 @@ class DroneNode(Node):
         gate_cfg = self.cfg["gate"]
         path = resolve_path(gate_cfg["pcd_path"])
         self.get_logger().info(f"Loading start gate point cloud from: {path}")
-        start = np.load(path)
-        finish = start.copy()
-        finish[:, 0] += gate_cfg["finish_offset_x"]
-        self.gate_pcd = np.vstack((start, finish))
+        model = np.load(path).astype(np.float64)
+        if gate_cfg.get("finish_offset_x") is not None:
+            finish = model.copy()
+            finish[:, 0] += gate_cfg["finish_offset_x"]
+            model = np.vstack((model, finish))
+        self.gate_pcd = model
+        # Where the gate centre is in the model file, and where it must sit in the track frame
+        # (the frame waypoints / poses are written in). The two differ by this shift.
+        self.gate_model_center = np.array(gate_cfg["model_center"], dtype=float)
         self.gate_center = np.array(gate_cfg["center"], dtype=float)
         self.get_logger().info(f"Start gate point cloud loaded with shape: {self.gate_pcd.shape}")
 
     def centering_gate(self):
-        """Align the live scan to the gate model. Returns (gate_center, 4x4 transform)."""
+        """Locate the gate in the live scan.
+
+        Returns (gate_center_in_body_frame, 4x4 matrix track frame -> body frame, score).
+        Retries with a fresh scan until the alignment score reaches align.min_score.
+        """
         if self.gate_pcd is None:
             self.get_logger().error("Start gate point cloud not set.")
             return None
+        a = self.cfg["align"]
 
-        self.current_scan = None
-        while self.current_scan is None and rclpy.ok():
-            self.get_logger().info("Waiting for current scan...")
-            rclpy.spin_once(self)
-
-        matrix = pygicp.align_points(self.current_scan, self.gate_pcd,
-                                     method=self.cfg["gate"]["align_method"],
-                                     initial_guess=self.initial_guess)
+        shift = np.eye(4)
+        shift[:3, 3] = -(self.gate_center - self.gate_model_center)   # track frame -> model frame
+        best = (None, -1.0)
+        for attempt in range(1, a["max_attempts"] + 1):
+            self.current_scan = None
+            while self.current_scan is None and rclpy.ok():
+                self.get_logger().info("Waiting for current scan...")
+                rclpy.spin_once(self)
+            t0 = time.time()
+            T, score = align_gate(self.current_scan, self.gate_pcd, self.cfg)
+            self.get_logger().info(
+                f"Gate alignment attempt {attempt}/{a['max_attempts']}: score {score:.2f} "
+                f"(need {a['min_score']:.2f}), {self.current_scan.shape[0]} points, {time.time() - t0:.1f} s")
+            if score > best[1]:
+                best = (T, score)
+            if score >= a["min_score"]:
+                break
+        else:
+            self.get_logger().warn(f"Gate alignment below min_score, using best score {best[1]:.2f}")
+        T, score = best
+        matrix = T @ shift
         center = matrix @ np.append(self.gate_center, 1.0)
-        return center[:3], matrix
+        self.get_logger().info(f"Gate centre in drone frame: x {center[0]:.2f}, y {center[1]:.2f}, z {center[2]:.2f}")
+        return center[:3], matrix, score
 
     # ---- flight ---------------------------------------------------------- #
     def takeoff(self, target_altitude=None):

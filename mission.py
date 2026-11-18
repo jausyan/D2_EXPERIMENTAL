@@ -12,7 +12,7 @@ def main():
     # --- Localise the gate and precompute everything in the map frame ------
     node.set_start_gate_pcd()
     rclpy.spin_once(node)
-    _, gate_mat = node.centering_gate()
+    gate_center, gate_mat, gate_score = node.centering_gate()
 
     while node.current_pose is None:
         node.get_logger().info("Waiting for current pose...")
@@ -23,6 +23,10 @@ def main():
     center_area = to_world(cfg["poses"]["center_area"])
     comm_start = to_world(cfg["poses"]["comm_start"])
     land_area = to_world(cfg["poses"]["land_area"])
+
+    gate_world = gate_to_world(cfg["gate"]["center"], gate_mat, pose, altitude=alt)
+    node.get_logger().info(
+        f"GATE CENTER (map) {gate_world[0]:.2f}, {gate_world[1]:.2f}, {gate_world[2]:.2f}  alignment score {gate_score:.2f}")
 
     spline = smooth_path(cfg["path"]["waypoints"], cfg["path"]["smoothing_factor"], cfg["path"]["num_samples"])
     world_path = np.array([gate_to_world(p, gate_mat, pose, altitude=alt) for p in spline])

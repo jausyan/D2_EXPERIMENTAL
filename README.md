@@ -6,8 +6,10 @@ mission.py          mission sequence only
 utils/utils_.py     helpers + DroneNode (ROS 2 / MAVROS / GICP / /mission/order)
 config/config.yaml  mission parameters, gate model, poses, waypoints
 config/mavros_param.yaml  MAVROS parameters
+config/path.rviz    RViz layout for scripts/path_capture.py
+config/fastlio_mid360_sim.yaml  FAST-LIO2 config for the simulation
 data/               gate point clouds
-scripts/            anti_point.py, capture_gate.py
+scripts/            path_capture.py (record waypoints), capture_gate.py, clean_gate.py, view_gate.py, lidar_relay.py
 setup/              SSH helper scripts
 ```
 
