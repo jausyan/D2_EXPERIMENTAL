@@ -9,10 +9,14 @@
 import argparse
 
 import numpy as np
-from scipy.ndimage import binary_dilation, label
 from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 from scipy.spatial import cKDTree
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from utils.utils_ import opening_centre  # noqa: E402
 
 
 def find_floor_height(pts, thresh=0.03, iters=300, seed=0):
@@ -37,24 +41,6 @@ def largest_cluster(pts, eps):
     g = coo_matrix((np.ones(len(pairs)), (pairs[:, 0], pairs[:, 1])), shape=(n, n))
     _, labels = connected_components(g, directed=False)
     return pts[labels == np.bincount(labels).argmax()]
-
-
-def opening_centre(pts, cell=0.05):
-    """Centre of the gate opening: the biggest empty hole, fully enclosed by the frame, seen from the front (y-z)."""
-    y0, z0 = pts[:, 1].min(), pts[:, 2].min()
-    iy = ((pts[:, 1] - y0) / cell).astype(int)
-    iz = ((pts[:, 2] - z0) / cell).astype(int)
-    grid = np.zeros((iy.max() + 1, iz.max() + 1), bool)
-    grid[iy, iz] = True
-    grid = binary_dilation(grid, iterations=1)           # close small gaps in the frame
-    labels, n = label(~grid)
-    border = set(labels[0]) | set(labels[-1]) | set(labels[:, 0]) | set(labels[:, -1])
-    holes = [(np.count_nonzero(labels == k), k) for k in range(1, n + 1) if k not in border]
-    if not holes:
-        return None
-    _, k = max(holes)
-    gy, gz = np.nonzero(labels == k)
-    return np.array([pts[:, 0].mean(), y0 + (gy.min() + gy.max() + 1) / 2 * cell, z0 + (gz.min() + gz.max() + 1) / 2 * cell])
 
 
 def main():

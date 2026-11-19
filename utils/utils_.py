@@ -14,6 +14,7 @@ from mavros_msgs.srv import CommandBool, SetMode
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from scipy.interpolate import splev, splprep
+from scipy.ndimage import binary_dilation, label
 from scipy.spatial import cKDTree
 from sensor_msgs.msg import PointCloud2
 from sensor_msgs_py import point_cloud2
@@ -154,6 +155,28 @@ def gate_to_world(point, gate_matrix, pose, altitude=None):
     p[1] += pose.pose.position.y
     p[2] = altitude if altitude is not None else p[2] + pose.pose.position.z
     return p
+
+
+# --------------------------------------------------------------------------- #
+# Gate model
+# --------------------------------------------------------------------------- #
+def opening_centre(pts, cell=0.05):
+    """Centre of the gate opening: the biggest empty hole, fully enclosed by the frame, seen from the front (y-z)."""
+    y0, z0 = pts[:, 1].min(), pts[:, 2].min()
+    iy = ((pts[:, 1] - y0) / cell).astype(int)
+    iz = ((pts[:, 2] - z0) / cell).astype(int)
+    grid = np.zeros((iy.max() + 1, iz.max() + 1), bool)
+    grid[iy, iz] = True
+    grid = binary_dilation(grid, iterations=1)           # close small gaps in the frame
+    labels, n = label(~grid)
+    border = set(labels[0]) | set(labels[-1]) | set(labels[:, 0]) | set(labels[:, -1])
+    holes = [(np.count_nonzero(labels == k), k) for k in range(1, n + 1) if k not in border]
+    if not holes:
+        return None
+    _, k = max(holes)
+    gy, gz = np.nonzero(labels == k)
+    return np.array([pts[:, 0].mean(), y0 + (gy.min() + gy.max() + 1) / 2 * cell, z0 + (gz.min() + gz.max() + 1) / 2 * cell])
+
 
 
 # --------------------------------------------------------------------------- #
@@ -309,7 +332,16 @@ class DroneNode(Node):
         self.gate_pcd = model
         # Where the gate centre is in the model file, and where it must sit in the track frame
         # (the frame waypoints / poses are written in). The two differ by this shift.
-        self.gate_model_center = np.array(gate_cfg["model_center"], dtype=float)
+        mc = gate_cfg.get("model_center", "auto")
+        if mc in (None, "auto"):
+            # measured from the model itself, so it can never disagree with the file in use
+            found = opening_centre(model)
+            if found is None:
+                raise RuntimeError("No closed gate opening found in the model; set gate.model_center by hand")
+            self.gate_model_center = found
+            self.get_logger().info(f"Gate model opening centre (auto): {np.round(found, 2).tolist()}")
+        else:
+            self.gate_model_center = np.array(mc, dtype=float)
         self.gate_center = np.array(gate_cfg["center"], dtype=float)
         self.get_logger().info(f"Start gate point cloud loaded with shape: {self.gate_pcd.shape}")
 

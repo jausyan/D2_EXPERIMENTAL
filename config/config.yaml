@@ -11,8 +11,9 @@ flight:
   cruise_altitude: 1.3
 
 gate:
-  pcd_path: data/gate_sim_clean.npy       # make it with scripts/capture_gate.py + clean_gate.py
-  model_center: [1.70, 0.13, 1.18]         # centre of the gate opening inside that file (clean_gate.py prints it)
+  pcd_path: data/gate_sim_asli.npy       # make it with scripts/capture_gate.py + clean_gate.py
+  model_center: auto                      # centre of the gate opening in the model file: auto = measured from the model
+                                          # (or give [x, y, z] by hand)
   center: [2.5, 0.0, 1.3]                 # where that centre sits in the track frame (waypoints, poses)
   finish_offset_x: null                   # real field: -5.0 adds a second gate 5 m behind, simulation: null
   align_method: GICP
