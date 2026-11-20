@@ -57,3 +57,4 @@ Thumbs.db
 # Local scratch and prompt notes
 peripherals/
 maps/*.pcd
+maps/.arena_view.dae

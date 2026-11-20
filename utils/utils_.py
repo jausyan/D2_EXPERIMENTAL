@@ -110,6 +110,7 @@ def smooth_path(path, smoothing_factor=0.5, num_samples=200):
     k = 3 if len(path) >= 4 else min(2, len(path) - 1)
     tck, _ = splprep([path[:, 0], path[:, 1], path[:, 2]], s=smoothing_factor, k=k)
     pts = np.array(splev(np.linspace(0, 1, num_samples), tck)).T
+    pts[:, 2] = np.clip(pts[:, 2], path[:, 2].min(), path[:, 2].max())   # the spline must not dip below the lowest waypoint
     return np.hstack((pts, np.ones((num_samples, 1))))
 
 
@@ -141,19 +142,24 @@ def ramer_douglas_peucker(path, epsilon=0.05):
     return np.array([start, end])
 
 
-def gate_to_world(point, gate_matrix, pose, altitude=None):
+def gate_to_world(point, gate_matrix, pose, altitude=None, keep_z=False):
     """Transform a point from the gate frame to the map frame.
 
     gate_matrix: 4x4 transform from the GICP alignment.
     pose: geometry_msgs/PoseStamped captured when the gate was aligned.
-    altitude: if given, overrides the resulting z.
+    keep_z: the output z is the point's own z, i.e. its height above the ground in the gate/track
+            frame (what follow_path / move_to expect). Use it so every waypoint keeps its altitude.
+    altitude: otherwise, if given, overrides the resulting z with one fixed value.
     """
     p = np.append(np.asarray(point, dtype=float)[:3], 1.0)
     p = point_rotation_by_quarternion(gate_matrix @ p, orientation_to_quat(pose.pose.orientation))
     p = np.array(p[:3], dtype=float)
     p[0] += pose.pose.position.x
     p[1] += pose.pose.position.y
-    p[2] = altitude if altitude is not None else p[2] + pose.pose.position.z
+    if keep_z:
+        p[2] = float(point[2])
+    else:
+        p[2] = altitude if altitude is not None else p[2] + pose.pose.position.z
     return p
 
 

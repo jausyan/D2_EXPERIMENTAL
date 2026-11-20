@@ -1,0 +1,220 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /Global Options1
+        - /Arena map1
+      Splitter Ratio: 0.5
+    Tree Height: 700
+  - Class: rviz_common/Views
+    Name: Views
+    Expanded:
+      - /Current View1
+    Splitter Ratio: 0.5
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 1
+      Plane Cell Count: 40
+      Color: 160; 160; 164
+      Alpha: 0.4
+      Plane: XY
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Reference Frame: <Fixed Frame>
+      Normal Cell Count: 0
+      Line Style:
+        Line Width: 0.03
+        Value: Lines
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Ground (click here)
+      Enabled: true
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /path_draw/floor
+      Style: Flat Squares
+      Size (Pixels): 3
+      Size (m): 0.1
+      Alpha: 1
+      Color Transformer: FlatColor
+      Color: 105; 105; 112
+      Use Fixed Frame: true
+      Position Transformer: XYZ
+      Selectable: true
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Arena (solid)
+      Enabled: true
+      Namespaces:
+        {}
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /path_draw/arena
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Arena map
+      Enabled: false
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /path_draw/map
+      Style: Points
+      Size (Pixels): 2
+      Size (m): 0.03
+      Alpha: 0.35
+      Color Transformer: AxisColor
+      Axis: Z
+      Use Fixed Frame: true
+      Autocompute Value Bounds: true
+      Invert Rainbow: false
+      Position Transformer: XYZ
+      Selectable: true
+      Use rainbow: true
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Gate model
+      Enabled: true
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /path_draw/gate
+      Style: Points
+      Size (Pixels): 4
+      Size (m): 0.03
+      Alpha: 1
+      Color Transformer: FlatColor
+      Color: 255; 40; 40
+      Use Fixed Frame: true
+      Position Transformer: XYZ
+      Selectable: false
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Waypoints
+      Enabled: true
+      Namespaces:
+        {}
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /path_draw/waypoints
+    - Class: rviz_default_plugins/Path
+      Name: Waypoint polyline
+      Enabled: true
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /path_draw/polyline
+      Color: 200; 200; 200
+      Alpha: 0.6
+      Line Style: Lines
+      Line Width: 0.02
+      Buffer Length: 1
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Pose Color: 255; 85; 255
+      Pose Style: None
+      Head Length: 0.3
+      Head Diameter: 0.2
+      Shaft Length: 1
+      Shaft Diameter: 0.1
+    - Class: rviz_default_plugins/Marker
+      Name: Flown spline (blue ok, red too close)
+      Enabled: true
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /path_draw/clearance
+    - Class: rviz_default_plugins/Path
+      Name: Spline path
+      Enabled: false
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /path_draw/path
+      Color: 25; 255; 0
+      Alpha: 1
+      Line Style: Lines
+      Line Width: 0.05
+      Buffer Length: 1
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Pose Color: 255; 85; 255
+      Pose Style: None
+      Head Length: 0.3
+      Head Diameter: 0.2
+      Shaft Length: 1
+      Shaft Diameter: 0.1
+  Enabled: true
+  Global Options:
+    Background Color: 40; 40; 40
+    Fixed Frame: map
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Measure
+      Line color: 128; 128; 0
+    - Class: rviz_default_plugins/PublishPoint
+      Single click: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /clicked_point
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Name: Current View
+      Target Frame: <Fixed Frame>
+      Distance: 28
+      Focal Point:
+        X: 7
+        Y: -7
+        Z: 0
+      Focal Shape Size: 0.05
+      Focal Shape Fixed Size: true
+      Near Clip Distance: 0.01
+      Pitch: 0.75
+      Yaw: 5.2
+      Invert Z Axis: false
+      Enable Stereo Rendering:
+        Stereo Eye Separation: 0.06
+        Stereo Focal Distance: 1
+        Swap Stereo Eyes: false
+        Value: false
+      Value: Orbit (rviz_default_plugins)
+    Saved: ~
+Window Geometry:
+  Displays:
+    collapsed: false
+  Height: 1000
+  Width: 1500

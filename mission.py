@@ -5,7 +5,6 @@ from utils.utils_ import (DroneNode, gate_to_world, load_config, ramer_douglas_p
 
 def main():
     cfg = load_config()
-    alt = cfg["flight"]["cruise_altitude"]
     ctl = cfg["controller"]
     rclpy.init()
     node = DroneNode(cfg)
@@ -19,22 +18,23 @@ def main():
         rclpy.spin_once(node)
     pose = node.current_pose
 
-    to_world = lambda p: gate_to_world(p, gate_mat, pose, altitude=alt)
+    # keep_z: every waypoint / pose flies at the altitude written in the config
+    to_world = lambda p: gate_to_world(p, gate_mat, pose, keep_z=True)
     center_area = to_world(cfg["poses"]["center_area"])
     comm_start = to_world(cfg["poses"]["comm_start"])
     land_area = to_world(cfg["poses"]["land_area"])
 
-    gate_world = gate_to_world(cfg["gate"]["center"], gate_mat, pose, altitude=alt)
+    gate_world = to_world(cfg["gate"]["center"])
     node.get_logger().info(
         f"GATE CENTER (map) {gate_world[0]:.2f}, {gate_world[1]:.2f}, {gate_world[2]:.2f}  alignment score {gate_score:.2f}")
 
     spline = smooth_path(cfg["path"]["waypoints"], cfg["path"]["smoothing_factor"], cfg["path"]["num_samples"])
-    world_path = np.array([gate_to_world(p, gate_mat, pose, altitude=alt) for p in spline])
+    world_path = np.array([to_world(p) for p in spline])
     # RDP-simplified variant is computed for inspection/visualisation only
     simple_path = ramer_douglas_peucker(world_path)  # noqa: F841
 
     # --- Mission sequence ---------------------------------------------------
-    node.wait_command("GO-1")
+    # node.wait_command("GO-1")
     node.takeoff()
     node.pub_command("GO-2")
     time.sleep(0.5)
