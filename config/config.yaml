@@ -171,6 +171,39 @@ path:
   num_samples: 200
   min_clearance: 0.5            # m, path_draw.py colours spline parts closer than this to a wall red
 
+avoid:                          # local obstacle avoidance inside follow_path
+  enabled: true
+  start_delay: 3.0              # s after follow_path starts before avoidance turns on (drone still settling at the gate)
+  period: 0.1                   # s between avoidance updates
+  s_min: 0.4                    # m ahead: box start
+  s_max: 4.0                    # m ahead: box end
+  l_max: 2.2                    # m: box half-width around the planned line
+  z_mode: ground                # ground: lidar z = height above ground (sim). sensor: z relative to the lidar
+  z_band: 0.3                   # m: keep lidar points within +-this of the drone height
+  sensor_z: 0.0                 # m: lidar height above the drone origin
+  cell: 0.1                     # m: clustering grid
+  min_points: 4                 # points per cluster (noise filter)
+  gate_width: 1.5               # m: opening between the two poles (inner edges)
+  gate_tolerance: 0.4           # m: accepted error of that gap
+  gate_depth_tolerance: 0.6     # m: poles must be side by side within this
+  pole_width: 0.35              # m: clusters narrower than this can be gate poles
+  drone_radius: 0.35            # m
+  clearance: 0.15               # m: extra margin (radius+clearance must stay < gate opening/2 = 0.63)
+  max_shift: 1.8                # m: max sideways offset from the planned path
+  max_rate: 1.5                 # m/s: how fast the offset may change
+  hold_time: 0.8                # s: keep a decision after the obstacle disappears
+  side_hold: 1.0                # s: do not flip the side again within this
+  slow_distance: 2.0            # m: slow down over this distance before an obstacle
+  body_radius: 0.6              # m: ignore lidar points this close (drone's own body)
+  gate_release: 1.0             # m: keep a seen gate locked until it is this far behind
+  pole_mask: 0.5                # m: while locked, ignore blobs this close to the poles
+  stop_distance: 0.8            # m: BLOCKED hovers x/y when the blocker is closer, else crawls
+  debug: false                  # one log line per state change with the nearest blobs
+  dump_dir: maps/avoid_dump     # raw scan + pose saved on the first BLOCKED events (null = off)
+  dump_max: 3
+  debug_period: 2.0             # s: repeat that line while AVOID/BLOCKED lasts
+  min_speed_scale: 0.3          # slowest speed factor while avoiding (BLOCKED = 0)
+
 controller:
   move_to:
     tolerance: 0.75

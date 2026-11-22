@@ -58,3 +58,4 @@ Thumbs.db
 peripherals/
 maps/*.pcd
 maps/.arena_view.dae
+maps/avoid_dump/

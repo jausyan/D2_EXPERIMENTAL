@@ -34,7 +34,6 @@ def main():
     simple_path = ramer_douglas_peucker(world_path)  # noqa: F841
 
     # --- Mission sequence ---------------------------------------------------
-    # node.wait_command("GO-1")
     node.takeoff()
     node.pub_command("GO-2")
     time.sleep(0.5)

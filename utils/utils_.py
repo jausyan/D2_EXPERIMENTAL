@@ -20,6 +20,8 @@ from sensor_msgs.msg import PointCloud2
 from sensor_msgs_py import point_cloud2
 from std_msgs.msg import String
 
+from utils.avoidance import LocalAvoider
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = PROJECT_ROOT / "config" / "config.yaml"
 
@@ -462,16 +464,43 @@ class DroneNode(Node):
 
     def follow_path(self, path):
         cfg = self.cfg["controller"]["follow_path"]
+        av_cfg = self.cfg.get("avoid", {})
+        avoider = LocalAvoider(av_cfg) if av_cfg.get("enabled") else None
         path = np.asarray(path)
         last_log = 0.0
+        last_avoid = 0.0
+        t_start = time.time()
+        avoid_on = False
+        delay = av_cfg.get("start_delay", 0.0)
         for i, point in enumerate(path):
+            # planned line for this leg: previous waypoint -> this one (drone start for the first)
+            origin = path[i - 1] if i > 0 else self._relative_position()
+            leg = point - origin
+            fwd = leg[:2] / (np.linalg.norm(leg[:2]) + 1e-9)
+            left = np.array([-fwd[1], fwd[0]])
             while rclpy.ok():
                 pos = self._relative_position()
-                direction = point - pos
+                target = np.array(point, dtype=float)
+                speed_scale = 1.0
+                if avoider is not None and time.time() - t_start >= delay:
+                    now = time.time()
+                    if not avoid_on:
+                        avoid_on = True
+                        self.get_logger().info("OBSTACLE AVOIDANCE ON")
+                    if now - last_avoid >= av_cfg["period"]:
+                        last_avoid = now
+                        q = orientation_to_quat(self.current_pose.pose.orientation)
+                        avoider.update(self.current_scan, pos, q, origin, fwd, now)
+                    target[:2] += left * avoider.offset
+                    speed_scale = avoider.speed_scale
+                    event = avoider.pop_event()
+                    if event:
+                        self.get_logger().info(event)
+                direction = target - pos
                 if time.time() - last_log >= 0.5:
                     last_log = time.time()
-                    self.get_logger().info(
-                        f"FOLLOWING PATH {pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f} (waypoint {i + 1}/{len(path)})")
+                    tag = f" [{avoider.state} {avoider.offset:+.2f}]" if avoider is not None and avoider.state != "CLEAR" else ""
+                    self.get_logger().info(f"FOLLOWING PATH {pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f}{tag}")
                 if np.linalg.norm(direction) < cfg["step_tolerance"]:
                     break
 
@@ -500,6 +529,9 @@ class DroneNode(Node):
                     vel_cmd.linear.x *= scale
                     vel_cmd.linear.y *= scale
                     vel_cmd.linear.z *= scale
+                # Slow / stop for obstacles ahead (BLOCKED -> hover)
+                vel_cmd.linear.x *= speed_scale      # x/y only: altitude hold keeps working
+                vel_cmd.linear.y *= speed_scale
                 self.vel_pub.publish(vel_cmd)
                 rclpy.spin_once(self)
         self.move_to(point, tolerance=cfg["final_tolerance"])
