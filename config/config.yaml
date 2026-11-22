@@ -176,24 +176,27 @@ avoid:                          # local obstacle avoidance inside follow_path
   start_delay: 3.0              # s after follow_path starts before avoidance turns on (drone still settling at the gate)
   period: 0.1                   # s between avoidance updates
   s_min: 0.4                    # m ahead: box start
-  s_max: 4.0                    # m ahead: box end
-  l_max: 2.2                    # m: box half-width around the planned line
+  s_max: 6.0                    # m ahead: box end
+  l_max: 2.6                    # m: box half-width around the planned line
   z_mode: ground                # ground: lidar z = height above ground (sim). sensor: z relative to the lidar
   z_band: 0.3                   # m: keep lidar points within +-this of the drone height
   sensor_z: 0.0                 # m: lidar height above the drone origin
   cell: 0.1                     # m: clustering grid
   min_points: 4                 # points per cluster (noise filter)
-  gate_width: 1.5               # m: opening between the two poles (inner edges)
+  gate_width: 1.5               # m: distance between the two pole CENTRES
   gate_tolerance: 0.4           # m: accepted error of that gap
-  gate_depth_tolerance: 0.6     # m: poles must be side by side within this
-  pole_width: 0.35              # m: clusters narrower than this can be gate poles
+  gate_max_angle: 55            # deg: max angle of the pole line away from straight across the path
+  pole_size: 0.45               # m: blobs up to this size (diagonal) can be gate poles
   drone_radius: 0.35            # m
   clearance: 0.15               # m: extra margin (radius+clearance must stay < gate opening/2 = 0.63)
-  max_shift: 1.8                # m: max sideways offset from the planned path
+  obstacle_clearance: 0.6        # m: extra margin around cylinders/walls (drone passes >= radius+this away)
+  gate_bonus: 1.0               # prefer a gate-like gap over a detour around it (cost bonus, m)
+  pass_distance: 1.0            # m: keep the detour lane until the obstacle is this far behind
+  max_shift: 2.2                # m: max sideways offset from the planned path
   max_rate: 1.5                 # m/s: how fast the offset may change
   hold_time: 0.8                # s: keep a decision after the obstacle disappears
   side_hold: 1.0                # s: do not flip the side again within this
-  slow_distance: 2.0            # m: slow down over this distance before an obstacle
+  slow_distance: 3.0            # m: slow down over this distance before an obstacle
   body_radius: 0.6              # m: ignore lidar points this close (drone's own body)
   gate_release: 1.0             # m: keep a seen gate locked until it is this far behind
   pole_mask: 0.5                # m: while locked, ignore blobs this close to the poles

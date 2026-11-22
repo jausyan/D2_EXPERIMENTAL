@@ -49,20 +49,26 @@ def cluster_xy(s, l, cell, min_points, z=None):
 
 
 def find_gate(clusters, cfg):
-    """Return (pair, centre_l) for the best pair of narrow poles spaced like the gate, else None."""
-    poles = [c for c in clusters if c["width"] <= cfg["pole_width"]]
+    """Best pair of pole-sized blobs spaced like the gate -> ((left, right), centre_l), else None.
+
+    Works from the distance between the pole CENTRES, so a gate seen at an angle still matches
+    (poles are then offset along the path, which used to reject it)."""
+    poles = [c for c in clusters if np.hypot(c["s_max"] - c["s_min"], c["l_max"] - c["l_min"]) <= cfg["pole_size"]]
     best = None
     for a in range(len(poles)):
         for b in range(a + 1, len(poles)):
-            left, right = (poles[a], poles[b]) if poles[a]["l_min"] > poles[b]["l_min"] else (poles[b], poles[a])
-            gap = left["l_min"] - right["l_max"]                      # inner edge to inner edge
-            if abs(gap - cfg["gate_width"]) > cfg["gate_tolerance"]:
+            pa, pb = poles[a], poles[b]
+            sa, la = 0.5 * (pa["s_min"] + pa["s_max"]), 0.5 * (pa["l_min"] + pa["l_max"])
+            sb, lb = 0.5 * (pb["s_min"] + pb["s_max"]), 0.5 * (pb["l_min"] + pb["l_max"])
+            dist = np.hypot(sa - sb, la - lb)                         # pole centre to pole centre
+            if abs(dist - cfg["gate_width"]) > cfg["gate_tolerance"]:
                 continue
-            if abs(left["s_min"] - right["s_min"]) > cfg["gate_depth_tolerance"]:
-                continue                                              # poles not side by side
-            err = abs(gap - cfg["gate_width"])
+            if abs(np.degrees(np.arctan2(abs(sa - sb), abs(la - lb)))) > cfg["gate_max_angle"]:
+                continue                                              # gate turned too far away from us
+            err = abs(dist - cfg["gate_width"])
             if best is None or err < best[0]:
-                best = (err, (left, right), 0.5 * (left["l_min"] + right["l_max"]))
+                pair = (pa, pb) if la > lb else (pb, pa)              # (left, right)
+                best = (err, pair, 0.5 * (la + lb))
     return None if best is None else (best[1], best[2])
 
 
@@ -82,6 +88,8 @@ class LocalAvoider:
         self._event = None            # one-line debug text, read once via pop_event()
         self._last_event_t = 0.0
         self._prev_state = "CLEAR"
+        self._pass = None             # last detour: {"lane": offset, "pts": world xy of what we pass}
+        self._lane = None
 
     # ------------------------------------------------------------------ #
     def update(self, scan, pos, quat, origin, fwd, now):
@@ -120,7 +128,14 @@ class LocalAvoider:
         if clusters:
             blockers = self._blockers(clusters, target if state == "GATE" else 0.0)
             if blockers:
-                target, state, speed = self._avoid(blockers, clusters, now)
+                target, state, speed = self._avoid(blockers, clusters, now, pos, origin)
+        if state == "CLEAR" and self._pass is not None:
+            # still beside what we detoured around: keep the lane until it is well behind us
+            ahead = max(float((w - np.asarray(pos[:2])) @ fwd) for w in self._pass["pts"])
+            if ahead > -cfg["pass_distance"]:
+                target, state = self._pass["lane"], "AVOID"
+            else:
+                self._pass = None
         if state != "CLEAR":
             self._last_seen = now
         self._debug(state, all_clusters, now)
@@ -206,36 +221,57 @@ class LocalAvoider:
         return cluster_xy(s[box], l[box], cfg["cell"], cfg["min_points"], z=p[box, 2])
 
     def _blockers(self, clusters, centre):
-        """Clusters that sit in the corridor the drone needs around lateral `centre`."""
-        half = self.cfg["drone_radius"] + self.cfg["clearance"]
+        """Clusters inside the (generous) corridor around lateral `centre`."""
+        half = self.cfg["drone_radius"] + self.cfg["obstacle_clearance"]
         return [c for c in clusters if c["l_max"] > centre - half and c["l_min"] < centre + half]
 
-    def _avoid(self, blockers, clusters, now):
+    def _avoid(self, blockers, clusters, now, pos, origin):
+        """Pick a lane (lateral offset): around an obstacle with a big margin, or through a gap
+        between obstacles (gate-like gaps preferred) with a small margin."""
         cfg = self.cfg
-        near = min(blockers, key=lambda c: c["s_min"])
-        # merge everything overlapping the nearest blocker so a wall made of pieces is one wall
-        lo, hi = near["l_min"], near["l_max"]
-        for c in blockers:
-            lo, hi = min(lo, c["l_min"]), max(hi, c["l_max"])
-        margin = cfg["drone_radius"] + cfg["clearance"]
-        cands = {+1: hi + margin, -1: lo - margin}                    # lane left / right of it
+        r = cfg["drone_radius"]
+        m_out, m_in = r + cfg["obstacle_clearance"], r + cfg["clearance"]
+        # merge blobs whose gap is too small to fly through into one obstacle
+        ivs = sorted([c["l_min"], c["l_max"]] for c in clusters)
+        merged = [ivs[0]]
+        for lo, hi in ivs[1:]:
+            if lo - merged[-1][1] < 2 * m_in:
+                merged[-1][1] = max(merged[-1][1], hi)
+            else:
+                merged.append([lo, hi])
 
-        def lane_free(l):
-            return all(not (c["l_max"] > l - margin and c["l_min"] < l + margin)
-                       for c in clusters if c not in blockers)
+        def clear_of(lane, margin_for):
+            for k, (lo, hi) in enumerate(merged):
+                need = margin_for.get(k, m_in)
+                if lane > lo - need and lane < hi + need:
+                    return False
+            return True
 
-        ok = {k: v for k, v in cands.items() if abs(v) <= cfg["max_shift"] and lane_free(v)}
-        if not ok:
-            near_s = min(c["s_min"] for c in blockers)
+        cands = []                                                    # (cost, lane, is_gate)
+        for k, (lo, hi) in enumerate(merged):
+            for lane in (hi + m_out, lo - m_out):                     # around obstacle k, big margin
+                if abs(lane) <= cfg["max_shift"] and clear_of(lane, {k: m_out}):
+                    cands.append((abs(lane), lane, False))
+            if k + 1 < len(merged):                                   # through the gap k -> k+1
+                gap = merged[k + 1][0] - hi
+                lane = 0.5 * (hi + merged[k + 1][0])
+                if abs(lane) <= cfg["max_shift"] and clear_of(lane, {}):
+                    is_gate = abs(gap + 2 * 0.1 - cfg["gate_width"]) <= cfg["gate_tolerance"]
+                    cands.append((abs(lane) - (cfg["gate_bonus"] if is_gate else 0.0), lane, is_gate))
+        near_s = min(c["s_min"] for c in blockers)
+        if not cands:
             # no way round: crawl while it is still far, hover (x/y only) when close; re-evaluated every tick
             return self.offset, "BLOCKED", (0.0 if near_s < cfg["stop_distance"] else cfg["min_speed_scale"])
-        if now < self._side_hold_until and self._side in ok:
-            side = self._side
-        else:
-            side = min(ok, key=lambda k: abs(ok[k]))                  # cheaper detour
-            if side != self._side:
-                self._side_hold_until = now + cfg["side_hold"]
-            self._side = side
-        dist = max(near["s_min"], 0.0)
-        speed = float(np.clip((dist - cfg["s_min"]) / max(cfg["slow_distance"], 1e-3), cfg["min_speed_scale"], 1.0))
-        return ok[side], "AVOID", speed
+        best = min(cands)
+        if self._lane is not None and now < self._side_hold_until:   # do not flip lanes every frame
+            same = [c for c in cands if abs(c[1] - self._lane) < 0.4]
+            if same:
+                best = min(same, key=lambda c: abs(c[1] - self._lane))
+        if self._lane is None or abs(best[1] - self._lane) >= 0.4:
+            self._side_hold_until = now + cfg["side_hold"]
+        self._lane = best[1]
+        self._pass = {"lane": best[1], "pts": [c["w"] for c in clusters]}
+        speed = float(np.clip((near_s - cfg["s_min"]) / max(cfg["slow_distance"], 1e-3), cfg["min_speed_scale"], 1.0))
+        # slow down only while the drone is still moving over to the lane; once it is on it, go on
+        speed = 1.0 - (1.0 - speed) * min(1.0, abs(best[1] - self.offset) / 0.5)
+        return best[1], ("GATE" if best[2] else "AVOID"), speed
