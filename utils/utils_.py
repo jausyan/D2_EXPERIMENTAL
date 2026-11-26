@@ -395,9 +395,10 @@ class DroneNode(Node):
         if target_altitude is None:
             target_altitude = self.cfg["flight"]["takeoff_altitude"]
 
-        # The lidar is not needed in flight until the mission ends; stop processing it
-        self.destroy_subscription(self.livox_sub)
-        self.livox_sub = None
+        # The lidar is only needed in flight for obstacle avoidance; otherwise stop processing it
+        if not self.cfg.get("avoid", {}).get("enabled") and self.livox_sub is not None:
+            self.destroy_subscription(self.livox_sub)
+            self.livox_sub = None
 
         self._wait_for_pose()
         self.zero_alt = self.current_pose.pose.position.z

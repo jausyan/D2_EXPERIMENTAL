@@ -1,10 +1,15 @@
+import argparse
 import time
 import numpy as np
 import rclpy
 from utils.utils_ import (DroneNode, gate_to_world, load_config, ramer_douglas_peucker, smooth_path)
 
 def main():
-    cfg = load_config()
+    parser = argparse.ArgumentParser(description="SAFMC mission")
+    parser.add_argument("--config", "-c", default=None,
+                        help="config file (default: config/config.yaml), e.g. config/config_sim.yaml")
+    args = parser.parse_args()
+    cfg = load_config(args.config) if args.config else load_config()
     ctl = cfg["controller"]
     rclpy.init()
     node = DroneNode(cfg)
@@ -35,9 +40,11 @@ def main():
 
     # --- Mission sequence ---------------------------------------------------
     node.takeoff()
-    node.pub_command("GO-2")
     time.sleep(0.5)
+    node.wait_command("READY-2", hold_position=True)
     node.move_to(comm_start, tolerance=ctl["comm_start"]["tolerance"])
+    time.sleep(1.5)
+    node.pub_command("GO-2")
     node.follow_path(world_path)
     node.move_to(center_area, tolerance=ctl["move_to"]["tolerance"])
     node.move_to(land_area)
