@@ -9,6 +9,9 @@ import pygicp
 import rclpy
 import yaml
 from geometry_msgs.msg import PoseStamped, Twist
+from nav_msgs.msg import Path as PathMsg
+from nav2_msgs.action import FollowPath
+from rclpy.action import ActionClient
 from mavros_msgs.msg import State
 from mavros_msgs.srv import CommandBool, SetMode
 from rclpy.node import Node
@@ -536,6 +539,87 @@ class DroneNode(Node):
                 self.vel_pub.publish(vel_cmd)
                 rclpy.spin_once(self)
         self.move_to(point, tolerance=cfg["final_tolerance"])
+        self.get_logger().info("PATH FOLLOWING DONE")
+
+    # ---- Nav2 path following (mission_nav2.py) --------------------------- #
+    def _nav2_cmd_cb(self, msg):
+        self._nav2_cmd = (msg.linear.x, msg.linear.y, time.time())
+
+    def _make_nav2_path(self, path):
+        msg = PathMsg()
+        msg.header.frame_id = "odom"
+        msg.header.stamp = self.get_clock().now().to_msg()
+        for i, p in enumerate(path):
+            nxt = path[min(i + 1, len(path) - 1)]
+            prv = path[max(i - 1, 0)]
+            yaw = math.atan2(nxt[1] - prv[1], nxt[0] - prv[0])
+            ps = PoseStamped()
+            ps.header = msg.header
+            ps.pose.position.x, ps.pose.position.y = float(p[0]), float(p[1])   # Nav2 plans in 2D
+            ps.pose.orientation.z, ps.pose.orientation.w = math.sin(yaw / 2), math.cos(yaw / 2)
+            msg.poses.append(ps)
+        return msg
+
+    def follow_path_nav2(self, path):
+        """Follow `path` with the light Nav2 stack (nav2/bringup.launch.py must be running).
+
+        Nav2's controller_server steers x/y around cylinders (costmap from the cylinder filter);
+        this method turns its cmd_vel into MAVROS velocity setpoints and holds each waypoint's altitude.
+        If Nav2 is unavailable or aborts, the rest of the path is flown with the plain follow_path()."""
+        cfg = self.cfg["controller"]["follow_path"]
+        n2 = self.cfg["nav2"]
+        path = np.asarray(path)
+        if not hasattr(self, "_nav2_client"):
+            self._nav2_client = ActionClient(self, FollowPath, n2["action"])
+            self._nav2_cmd = (0.0, 0.0, 0.0)
+            self.create_subscription(Twist, n2["cmd_topic"], self._nav2_cmd_cb, 10)
+        if not self._nav2_client.wait_for_server(timeout_sec=n2["server_timeout"]):
+            self.get_logger().warn("Nav2 controller not available -> plain follow_path()")
+            return self.follow_path(path)
+
+        goal = FollowPath.Goal()
+        goal.path = self._make_nav2_path(path)
+        goal.controller_id = "FollowPath"
+        goal.goal_checker_id = "general_goal_checker"
+        send = self._nav2_client.send_goal_async(goal)
+        while rclpy.ok() and not send.done():
+            rclpy.spin_once(self, timeout_sec=0.05)
+        handle = send.result()
+        if handle is None or not handle.accepted:
+            self.get_logger().warn("Nav2 rejected the path -> plain follow_path()")
+            return self.follow_path(path)
+        result = handle.get_result_async()
+
+        last_log = 0.0
+        while rclpy.ok():
+            rclpy.spin_once(self, timeout_sec=0.02)
+            pos = self._relative_position()
+            if np.linalg.norm(path[-1][:2] - pos[:2]) < cfg["final_tolerance"]:
+                break
+            if result.done():                      # Nav2 finished (or gave up)
+                status = result.result().status
+                if status != 4:                    # 4 = SUCCEEDED
+                    rest = path[int(np.argmin(np.linalg.norm(path[:, :2] - pos[:2], axis=1))):]
+                    self.get_logger().warn(f"Nav2 ended with status {status} -> plain follow_path() for the rest")
+                    return self.follow_path(rest)
+                break
+            vx, vy, stamp = self._nav2_cmd
+            if time.time() - stamp > n2["cmd_timeout"]:
+                vx = vy = 0.0                      # stale command: hover in x/y
+            yaw = yaw_from_orientation(self.current_pose.pose.orientation)
+            c, s = math.cos(yaw), math.sin(yaw)    # base_link -> world
+            i = int(np.argmin(np.linalg.norm(path[:, :2] - pos[:2], axis=1)))
+            vel = Twist()
+            vel.linear.x = c * vx - s * vy
+            vel.linear.y = s * vx + c * vy
+            vel.linear.z = float(np.clip(path[i][2] - pos[2], -n2["max_vz"], n2["max_vz"]))
+            self.vel_pub.publish(vel)
+            if time.time() - last_log >= 0.5:
+                last_log = time.time()
+                self.get_logger().info(f"FOLLOWING PATH {pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f} [NAV2]")
+        self.vel_pub.publish(Twist())
+        handle.cancel_goal_async()
+        self.move_to(path[-1], tolerance=cfg["final_tolerance"])
         self.get_logger().info("PATH FOLLOWING DONE")
 
     def spin_drone(self, duration, angle_step=10.0, step_duration=0.5):

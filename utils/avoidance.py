@@ -11,41 +11,8 @@ to add to the next waypoint.
 Lateral values are measured against the PLANNED path line (origin + fwd).
 """
 import numpy as np
-from scipy.ndimage import binary_dilation, label
 
-
-def quat_to_matrix(q):
-    """q = (w, x, y, z) -> 3x3 rotation matrix."""
-    w, x, y, z = q
-    return np.array([
-        [1 - 2*(y*y + z*z), 2*(x*y - z*w),     2*(x*z + y*w)],
-        [2*(x*y + z*w),     1 - 2*(x*x + z*z), 2*(y*z - x*w)],
-        [2*(x*z - y*w),     2*(y*z + x*w),     1 - 2*(x*x + y*y)]])
-
-
-def cluster_xy(s, l, cell, min_points, z=None):
-    """Group (s, l) points into blobs on a grid. Returns list of dicts (s/l extents, count)."""
-    if len(s) == 0:
-        return []
-    i = np.floor((s - s.min()) / cell).astype(int)
-    j = np.floor((l - l.min()) / cell).astype(int)
-    grid = np.zeros((i.max() + 3, j.max() + 3), dtype=bool)
-    grid[i + 1, j + 1] = True
-    # dilate by one cell so a pole seen as a few scattered returns is still one blob
-    labels, n = label(binary_dilation(grid, iterations=1), structure=np.ones((3, 3)))
-    point_labels = labels[i + 1, j + 1]
-    out = []
-    for k in range(1, n + 1):
-        m = point_labels == k
-        if m.sum() < min_points:
-            continue
-        out.append({"count": int(m.sum()),
-                    "s_min": float(s[m].min()), "s_max": float(s[m].max()),
-                    "l_min": float(l[m].min()), "l_max": float(l[m].max()),
-                    "width": float(l[m].max() - l[m].min())})
-        if z is not None:
-            out[-1]["z_min"], out[-1]["z_max"] = float(z[m].min()), float(z[m].max())
-    return out
+from utils.cylinder import cluster_xy, is_cylinder, quat_to_matrix
 
 
 class LocalAvoider:
@@ -180,9 +147,7 @@ class LocalAvoider:
         l = d @ left                                                  # lateral vs planned line
         box = (s >= cfg["s_min"]) & (s <= cfg["s_max"]) & (np.abs(l) <= cfg["l_max"])
         blobs = cluster_xy(s[box], l[box], cfg["cell"], cfg["min_points"], z=p[box, 2])
-        # cylinders only: thin gate poles are smaller, gate bars / walls are bigger
-        return [c for c in blobs
-                if cfg["cyl_min"] <= np.hypot(c["s_max"] - c["s_min"], c["l_max"] - c["l_min"]) <= cfg["cyl_max"]]
+        return [c for c in blobs if is_cylinder(c, cfg)]      # cylinders only (shared with Nav2)
 
     def _blockers(self, clusters, centre):
         """Clusters inside the (generous) corridor around lateral `centre`."""
